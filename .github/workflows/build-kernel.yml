@@ -9,7 +9,7 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4 # v4 is fine with the Node24 env flag
 
       - name: Setup environment
         run: |
@@ -37,7 +37,7 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:${PATH}
           
           cd kernel-source
-          # Direct make command to avoid shell parsing bugs
+          # Combined make commands to bypass shell variable bugs
           make O=../out ARCH=arm64 ${{ env.BUILD_ARGS }} CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 ${{ env.KERNEL_CONFIG }}
           make -j$(nproc --all) O=../out ARCH=arm64 ${{ env.BUILD_ARGS }} CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1
 
@@ -46,7 +46,7 @@ jobs:
           git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
           
-          # Move whatever image format the compiler produced
+          # Move whatever image format was created
           if [[ -f out/arch/arm64/boot/Image.gz-dtb ]]; then
             cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           elif [[ -f out/arch/arm64/boot/Image-dtb ]]; then
@@ -62,7 +62,7 @@ jobs:
           fi
 
       - name: Upload kernel
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: MikaKernel-UAC2
           path: AnyKernel3/*
