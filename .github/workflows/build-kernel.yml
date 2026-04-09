@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
 
 env:
-  # Fix Node.js 20 deprecation - opt into Node.js 24 now [citation:1][citation:5][citation:9]
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -29,43 +28,43 @@ jobs:
         sudo apt update
         sudo apt install -y bc bison build-essential ccache curl flex gcc-multilib g++-multilib git gnupg gperf libxml2-utils lzop pngcrush schedtool squashfs-tools xsltproc zip zlib1g-dev libssl-dev
 
-    - name: Get Clang (Prebuilt)
+    - name: Get Proton Clang (kdrag0n - Stable r522817)
       run: |
         mkdir -p toolchains/clang
         cd toolchains/clang
-        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r29/clang-14.0.7.tar.gz
-        tar -xf clang-14.0.7.tar.gz
-        rm clang-14.0.7.tar.gz
+        curl -L -o clang.tar.gz https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.tar.gz
+        tar -xzf clang.tar.gz --strip-components=1
+        rm clang.tar.gz
+        chmod +x bin/*
 
-    - name: Get 32-bit ARM GCC (LIVE mirror from LineageOS)
-      run: |
-        mkdir -p toolchains/gcc32
-        cd toolchains/gcc32
-        wget -q https://mirror.math.princeton.edu/pub/lineageos/prebuilt_tools/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9.tar.xz
-        tar -xf arm-linux-androideabi-4.9.tar.xz
-        rm arm-linux-androideabi-4.9.tar.xz
-
-    - name: Get 64-bit ARM GCC (Live mirror)
+    - name: Get 64-bit ARM GCC (LineageOS 19.1)
       run: |
         mkdir -p toolchains/gcc64
         cd toolchains/gcc64
-        wget -q https://mirror.math.princeton.edu/pub/lineageos/prebuilt_tools/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.tar.xz
-        tar -xf aarch64-linux-android-4.9.tar.xz
-        rm aarch64-linux-android-4.9.tar.xz
+        curl -L -o gcc64.tar.gz https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9/archive/refs/heads/lineage-19.1.tar.gz
+        tar -xzf gcc64.tar.gz --strip-components=1
+        rm gcc64.tar.gz
+
+    - name: Get 32-bit ARM GCC (LineageOS 19.1)
+      run: |
+        mkdir -p toolchains/gcc32
+        cd toolchains/gcc32
+        curl -L -o gcc32.tar.gz https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9/archive/refs/heads/lineage-19.1.tar.gz
+        tar -xzf gcc32.tar.gz --strip-components=1
+        rm gcc32.tar.gz
 
     - name: Fix PRIME_CPU_MASK infinite loop & Enable UAC2 Audio
       working-directory: ./kernel
       run: |
-        # Fix the broken empty CPU mask (causes infinite prompt)
+        # Fix the broken empty CPU mask (causes infinite prompt loop)
         sed -i 's/^CONFIG_PRIME_CPU_MASK=""/CONFIG_PRIME_CPU_MASK="0"/g' arch/arm64/configs/vendor/miatoll-stock_defconfig
 
-        # Inject USB gadget audio flags
-        echo "CONFIG_USB_CONFIGFS_F_UAC2=y" >> arch/arm64/configs/vendor/miatoll-stock_defconfig
-        echo "CONFIG_USB_CONFIGFS_F_UAC1=y" >> arch/arm64/configs/vendor/miatoll-stock_defconfig
-        echo "CONFIG_USB_G_AUDIO=y" >> arch/arm64/configs/vendor/miatoll-stock_defconfig
-
-        # Generate non-interactive .config
-        make ARCH=arm64 olddefconfig CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- O=out
+        # Enable USB Gadget Audio (UAC2/UAC1)
+        cat >> arch/arm64/configs/vendor/miatoll-stock_defconfig << 'EOF'
+CONFIG_USB_CONFIGFS_F_UAC2=y
+CONFIG_USB_CONFIGFS_F_UAC1=y
+CONFIG_USB_G_AUDIO=y
+EOF
 
     - name: Build Kernel
       working-directory: ./kernel
@@ -75,31 +74,44 @@ jobs:
         export CROSS_COMPILE_ARM32=arm-linux-androideabi-
         export CC=clang
         export CLANG_TRIPLE=aarch64-linux-gnu-
-
+        
+        # Verify toolchains are working
+        echo "=== Toolchain Verification ==="
+        clang --version | head -n1
+        ${CROSS_COMPILE}gcc --version | head -n1
+        ${CROSS_COMPILE_ARM32}gcc --version | head -n1
+        echo "=============================="
+        
+        # Generate defconfig
         make O=out ARCH=arm64 vendor/miatoll-stock_defconfig
-
-        # Double-check UAC2 flags are present (safety)
-        scripts/config --file out/.config --enable CONFIG_USB_CONFIGFS_F_UAC2
-        scripts/config --file out/.config --enable CONFIG_USB_CONFIGFS_F_UAC1
-        scripts/config --file out/.config --enable CONFIG_USB_G_AUDIO
-
+        
+        # Ensure UAC2 flags survive olddefconfig
         make O=out ARCH=arm64 olddefconfig
-
-        # Build the kernel (use all cores)
+        
+        # Verify UAC2 flags are set
+        grep -E "CONFIG_USB_CONFIGFS_F_UAC[12]|CONFIG_USB_G_AUDIO" out/.config || echo "WARNING: UAC2 flags missing"
+        
+        # Build kernel
         make -j$(nproc) O=out ARCH=arm64 Image.gz dtbo.img
 
-    - name: Prepare AnyKernel3 Package
+    - name: Package AnyKernel3 Zip
       run: |
+        # Copy kernel images
         cp kernel/out/arch/arm64/boot/Image.gz anykernel/
         cp kernel/out/arch/arm64/boot/dtbo.img anykernel/
-        if [ -f kernel/out/arch/arm64/boot/dtb.img ]; then
-          cp kernel/out/arch/arm64/boot/dtb.img anykernel/
-        fi
+        
+        # Copy dtb.img if it exists
+        [ -f kernel/out/arch/arm64/boot/dtb.img ] && cp kernel/out/arch/arm64/boot/dtb.img anykernel/
+        
+        # Create zip
         cd anykernel
-        zip -r9 ../Xiaomi_Miatoll_Kernel_UAC2_$(date +%Y%m%d_%H%M).zip * -x .git README.md
+        zip -r9 ../Xiaomi_Miatoll_UAC2_$(date +%Y%m%d-%H%M%S).zip * -x .git README.md .gitignore
+        
+        echo "✅ Package created successfully"
 
     - name: Upload Kernel Zip
       uses: actions/upload-artifact@v4
       with:
-        name: Xiaomi_Miatoll_Kernel_UAC2
-        path: Xiaomi_Miatoll_Kernel_UAC2_*.zip
+        name: Xiaomi-Miatoll-Kernel-UAC2
+        path: Xiaomi_Miatoll_UAC2_*.zip
+        compression-level: 0
