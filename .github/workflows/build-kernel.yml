@@ -32,25 +32,24 @@ jobs:
 
       - name: Build Kernel
         run: |
+          export PATH=$GITHUB_WORKSPACE/clang/bin:${PATH}
           export KBUILD_BUILD_USER="zclkkk"
           export KBUILD_BUILD_HOST="workspace"
-          export PATH=$GITHUB_WORKSPACE/clang/bin:${PATH}
           
           cd kernel-source
           
           # 1. Generate the base config
           make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 ${{ env.KERNEL_CONFIG }}
           
-          # 2. Force-enable USB Audio and fix the specific PRIME_CPU_MASK bug
-          echo "CONFIG_USB_CONFIGFS_F_UAC2=y" >> .config
-          echo "CONFIG_USB_CONFIGFS_F_UAC1=y" >> .config
-          echo "CONFIG_USB_G_AUDIO=y" >> .config
+          # 2. Use the kernel's own config script to set values correctly
+          # This prevents the "interactive prompt" loop
+          ./scripts/config --file .config --set-val PRIME_CPU_MASK 0
+          ./scripts/config --file .config --enable USB_CONFIGFS_F_UAC2
+          ./scripts/config --file .config --enable USB_CONFIGFS_F_UAC1
+          ./scripts/config --file .config --enable USB_G_AUDIO
           
-          # Fix the invalid empty string that causes the 'aborted' error
-          sed -i 's/CONFIG_PRIME_CPU_MASK=""/CONFIG_PRIME_CPU_MASK=0/g' .config
-          
-          # 3. The "Auto-Pilot": Automatically press Enter for any "moire" questions
-          yes "" | make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 oldconfig
+          # 3. Apply the changes non-interactively
+          make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
           
           # 4. Final Compilation
           make -j$(nproc --all) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1
@@ -60,7 +59,6 @@ jobs:
           git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
           
-          # Search and copy the build output
           if [[ -f kernel-source/arch/arm64/boot/Image.gz-dtb ]]; then
             cp kernel-source/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           elif [[ -f kernel-source/arch/arm64/boot/Image-dtb ]]; then
