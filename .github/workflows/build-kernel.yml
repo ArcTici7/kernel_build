@@ -20,11 +20,17 @@ jobs:
           echo "KERNEL_SOURCE_BRANCH=$(grep -w "KERNEL_SOURCE_BRANCH" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
           echo "KERNEL_CONFIG=$(grep -w "KERNEL_CONFIG" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
 
-      - name: Pull Toolchain
+      - name: Pull Toolchains
         run: |
+          # Pull Clang (64-bit)
           mkdir clang
           curl -RLO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android16-release/clang-r547379.tar.gz
           tar -C clang/ -xf clang-*.tar.gz
+          
+          # Pull GCC (32-bit) for compat vDSO requirement
+          mkdir gcc32
+          curl -RLO https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/heads/master.tar.gz
+          tar -C gcc32/ -xf arm-linux-androideabi-4.9-*.tar.gz
 
       - name: Pull Kernel Source
         run: |
@@ -32,33 +38,36 @@ jobs:
 
       - name: Build Kernel
         run: |
-          export PATH=$GITHUB_WORKSPACE/clang/bin:${PATH}
+          export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc32/bin:${PATH}
           export KBUILD_BUILD_USER="zclkkk"
           export KBUILD_BUILD_HOST="workspace"
+          
+          # Consolidated Toolchain Params
+          export CLANG_PARAMS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-androideabi- LLVM=1 LLVM_IAS=1"
           
           cd kernel-source
           
           # 1. Generate the base config
-          make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 ${{ env.KERNEL_CONFIG }}
+          make ARCH=arm64 $CLANG_PARAMS ${{ env.KERNEL_CONFIG }}
           
-          # 2. Use the kernel's own config script to set values correctly
-          # This prevents the "interactive prompt" loop
+          # 2. Programmatically set values to avoid the "Interactive Loop"
           ./scripts/config --file .config --set-val PRIME_CPU_MASK 0
           ./scripts/config --file .config --enable USB_CONFIGFS_F_UAC2
           ./scripts/config --file .config --enable USB_CONFIGFS_F_UAC1
           ./scripts/config --file .config --enable USB_G_AUDIO
           
-          # 3. Apply the changes non-interactively
-          make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          # 3. Apply changes and ignore all new prompts
+          make ARCH=arm64 $CLANG_PARAMS olddefconfig
           
-          # 4. Final Compilation
-          make -j$(nproc --all) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1
+          # 4. Actual Compilation
+          make -j$(nproc --all) ARCH=arm64 $CLANG_PARAMS
 
       - name: Package Kernel
         run: |
           git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
           
+          # Move build output to AnyKernel folder
           if [[ -f kernel-source/arch/arm64/boot/Image.gz-dtb ]]; then
             cp kernel-source/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           elif [[ -f kernel-source/arch/arm64/boot/Image-dtb ]]; then
