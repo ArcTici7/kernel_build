@@ -1,27 +1,30 @@
 name: Build MikaKernel
 
-
 on:
   workflow_dispatch:
-
 
 jobs:
   build-kernel:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
       - name: Setup environment
         run: |
-          echo "ANYKERNEL_SOURCE=$(cat config.env | grep -w "ANYKERNEL_SOURCE" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
-          echo "ANYKERNEL_SOURCE_BRANCH=$(cat config.env | grep -w "ANYKERNEL_SOURCE_BRANCH" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
-          echo "KERNEL_SOURCE=$(cat config.env | grep -w "KERNEL_SOURCE" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
-          echo "KERNEL_SOURCE_BRANCH=$(cat config.env | grep -w "KERNEL_SOURCE_BRANCH" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
-          echo "KERNEL_CONFIG=$(cat config.env | grep -w "KERNEL_CONFIG" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
-          echo "BUILD_ARGS=$(cat config.env | grep -w "BUILD_ARGS" | head -n 1 | cut -d ":" -f 2)" >> $GITHUB_ENV
+          echo "ANYKERNEL_SOURCE=$(grep -w "ANYKERNEL_SOURCE" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
+          echo "ANYKERNEL_SOURCE_BRANCH=$(grep -w "ANYKERNEL_SOURCE_BRANCH" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
+          echo "KERNEL_SOURCE=$(grep -w "KERNEL_SOURCE" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
+          echo "KERNEL_SOURCE_BRANCH=$(grep -w "KERNEL_SOURCE_BRANCH" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
+          echo "KERNEL_CONFIG=$(grep -w "KERNEL_CONFIG" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
+          echo "BUILD_ARGS=$(grep -w "BUILD_ARGS" config.env | cut -d ":" -f 2- | xargs)" >> $GITHUB_ENV
 
       - name: Pull toolchain
         run: |
-          mkdir clang && curl https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android16-release/clang-r547379.tar.gz -RLO && tar -C clang/ -xf clang-*.tar.gz
+          mkdir clang
+          curl -RLO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android16-release/clang-r547379.tar.gz
+          tar -C clang/ -xf clang-*.tar.gz
 
       - name: Pull kernel source
         run: |
@@ -32,20 +35,22 @@ jobs:
           export KBUILD_BUILD_USER="zclkkk"
           export KBUILD_BUILD_HOST="workspace"
           export PATH=$GITHUB_WORKSPACE/clang/bin:${PATH}
-          args="                  ARCH=arm64 \
-                                  O=../out \
-                                  ${{ env.BUILD_ARGS }} \
-                                  CLANG_TRIPLE=aarch64-linux-gnu- \
-                                  LLVM=1 LLVM_IAS=1 "
+          args="ARCH=arm64 \
+                O=../out \
+                ${{ env.BUILD_ARGS }} \
+                CLANG_TRIPLE=aarch64-linux-gnu- \
+                CROSS_COMPILE=aarch64-linux-gnu- \
+                LLVM=1 LLVM_IAS=1"
           cd kernel-source
           make ${args} ${{ env.KERNEL_CONFIG }}
-          make -j$(($(getconf _NPROCESSORS_ONLN) * 2)) ${args}
+          make -j$(nproc --all) ${args}
 
       - name: Package kernel
         run: |
-          git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3 && rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
+          git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
           if [[ -f out/arch/arm64/boot/Image.gz-dtb ]]; then
-            cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+            cp out/arch/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           elif [[ -f out/arch/arm64/boot/Image-dtb ]]; then
             cp out/arch/arm64/boot/Image-dtb AnyKernel3/Image-dtb
           elif [[ -f out/arch/arm64/boot/Image.gz ]]; then
@@ -57,8 +62,8 @@ jobs:
             cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
           fi
 
-      - name: Upload kernel to artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload kernel
+        uses: actions/upload-artifact@v6
         with:
-          name: output_kernel
+          name: MikaKernel-UAC2
           path: AnyKernel3/*
