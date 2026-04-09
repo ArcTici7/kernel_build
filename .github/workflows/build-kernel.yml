@@ -41,13 +41,16 @@ jobs:
           # 1. Generate the base config
           make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 ${{ env.KERNEL_CONFIG }}
           
-          # 2. Force-enable USB Audio (UAC2) for the motherboard crackle fix
+          # 2. Force-enable USB Audio and fix the specific PRIME_CPU_MASK bug
           echo "CONFIG_USB_CONFIGFS_F_UAC2=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_UAC1=y" >> .config
           echo "CONFIG_USB_G_AUDIO=y" >> .config
           
-          # 3. Auto-accept new config symbols to prevent interactive prompts/aborts
-          make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          # Fix the invalid empty string that causes the 'aborted' error
+          sed -i 's/CONFIG_PRIME_CPU_MASK=""/CONFIG_PRIME_CPU_MASK=0/g' .config
+          
+          # 3. The "Auto-Pilot": Automatically press Enter for any "moire" questions
+          yes "" | make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 oldconfig
           
           # 4. Final Compilation
           make -j$(nproc --all) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1
