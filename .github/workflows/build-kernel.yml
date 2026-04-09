@@ -27,10 +27,10 @@ jobs:
           curl -RLO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android16-release/clang-r547379.tar.gz
           tar -C clang/ -xf clang-*.tar.gz
           
-          # Pull GCC (32-bit) for compat vDSO requirement
+          # Pull GCC (32-bit) from a high-speed GitHub mirror to avoid redirect errors
           mkdir gcc32
-          curl -RLO https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/heads/master.tar.gz
-          tar -C gcc32/ -xf arm-linux-androideabi-4.9-*.tar.gz
+          curl -L https://github.com/StatiXOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9/archive/refs/heads/cm-14.1.tar.gz -o gcc32.tar.gz
+          tar -C gcc32/ --strip-components=1 -xf gcc32.tar.gz
 
       - name: Pull Kernel Source
         run: |
@@ -42,7 +42,7 @@ jobs:
           export KBUILD_BUILD_USER="zclkkk"
           export KBUILD_BUILD_HOST="workspace"
           
-          # Consolidated Toolchain Params
+          # Consolidated Toolchain Params including the 32-bit path
           export CLANG_PARAMS="CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-androideabi- LLVM=1 LLVM_IAS=1"
           
           cd kernel-source
@@ -50,7 +50,7 @@ jobs:
           # 1. Generate the base config
           make ARCH=arm64 $CLANG_PARAMS ${{ env.KERNEL_CONFIG }}
           
-          # 2. Programmatically set values to avoid the "Interactive Loop"
+          # 2. Hard-code the problematic values before the build starts
           ./scripts/config --file .config --set-val PRIME_CPU_MASK 0
           ./scripts/config --file .config --enable USB_CONFIGFS_F_UAC2
           ./scripts/config --file .config --enable USB_CONFIGFS_F_UAC1
@@ -67,7 +67,7 @@ jobs:
           git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
           
-          # Move build output to AnyKernel folder
+          # Copy whatever output image the kernel produced
           if [[ -f kernel-source/arch/arm64/boot/Image.gz-dtb ]]; then
             cp kernel-source/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           elif [[ -f kernel-source/arch/arm64/boot/Image-dtb ]]; then
