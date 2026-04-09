@@ -9,60 +9,68 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - uses: actions/checkout@v4 # v4 is fine with the Node24 env flag
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Setup environment
+      - name: Setup Environment
         run: |
           echo "ANYKERNEL_SOURCE=$(grep -w "ANYKERNEL_SOURCE" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
           echo "ANYKERNEL_SOURCE_BRANCH=$(grep -w "ANYKERNEL_SOURCE_BRANCH" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
           echo "KERNEL_SOURCE=$(grep -w "KERNEL_SOURCE" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
           echo "KERNEL_SOURCE_BRANCH=$(grep -w "KERNEL_SOURCE_BRANCH" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
           echo "KERNEL_CONFIG=$(grep -w "KERNEL_CONFIG" config.env | cut -d "=" -f 2)" >> $GITHUB_ENV
-          echo "BUILD_ARGS=$(grep -w "BUILD_ARGS" config.env | cut -d ":" -f 2- | xargs)" >> $GITHUB_ENV
 
-      - name: Pull toolchain
+      - name: Pull Toolchain
         run: |
           mkdir clang
           curl -RLO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android16-release/clang-r547379.tar.gz
           tar -C clang/ -xf clang-*.tar.gz
 
-      - name: Pull kernel source
+      - name: Pull Kernel Source
         run: |
           git clone --depth=1 ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_SOURCE_BRANCH }} kernel-source
 
-      - name: Build kernel
+      - name: Build Kernel
         run: |
           export KBUILD_BUILD_USER="zclkkk"
           export KBUILD_BUILD_HOST="workspace"
           export PATH=$GITHUB_WORKSPACE/clang/bin:${PATH}
           
           cd kernel-source
-          # Combined make commands to bypass shell variable bugs
-          make O=../out ARCH=arm64 ${{ env.BUILD_ARGS }} CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 ${{ env.KERNEL_CONFIG }}
-          make -j$(nproc --all) O=../out ARCH=arm64 ${{ env.BUILD_ARGS }} CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1
+          
+          # 1. Generate the base config
+          make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 ${{ env.KERNEL_CONFIG }}
+          
+          # 2. Inject USB Audio flags directly into the generated .config
+          echo "CONFIG_USB_CONFIGFS_F_UAC2=y" >> .config
+          echo "CONFIG_USB_CONFIGFS_F_UAC1=y" >> .config
+          echo "CONFIG_USB_G_AUDIO=y" >> .config
+          
+          # 3. Final build
+          make -j$(nproc --all) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1
 
-      - name: Package kernel
+      - name: Package Kernel
         run: |
           git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
           
-          # Move whatever image format was created
-          if [[ -f out/arch/arm64/boot/Image.gz-dtb ]]; then
-            cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
-          elif [[ -f out/arch/arm64/boot/Image-dtb ]]; then
-            cp out/arch/arm64/boot/Image-dtb AnyKernel3/Image-dtb
-          elif [[ -f out/arch/arm64/boot/Image.gz ]]; then
-            cp out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
-          elif [[ -f out/arch/arm64/boot/Image ]]; then
-            cp out/arch/arm64/boot/Image AnyKernel3/Image
+          # Search for the output image in the source tree
+          if [[ -f kernel-source/arch/arm64/boot/Image.gz-dtb ]]; then
+            cp kernel-source/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+          elif [[ -f kernel-source/arch/arm64/boot/Image-dtb ]]; then
+            cp kernel-source/arch/arm64/boot/Image-dtb AnyKernel3/Image-dtb
+          elif [[ -f kernel-source/arch/arm64/boot/Image.gz ]]; then
+            cp kernel-source/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
+          elif [[ -f kernel-source/arch/arm64/boot/Image ]]; then
+            cp kernel-source/arch/arm64/boot/Image AnyKernel3/Image
           fi
           
-          if [ -f out/arch/arm64/boot/dtbo.img ]; then
-            cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+          if [ -f kernel-source/arch/arm64/boot/dtbo.img ]; then
+            cp kernel-source/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
           fi
 
-      - name: Upload kernel
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v5
         with:
-          name: MikaKernel-UAC2
+          name: MikaKernel-UAC2-Miatoll
           path: AnyKernel3/*
