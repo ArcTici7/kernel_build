@@ -10,7 +10,7 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Environment
         run: |
@@ -41,12 +41,15 @@ jobs:
           # 1. Generate the base config
           make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 ${{ env.KERNEL_CONFIG }}
           
-          # 2. Inject USB Audio flags directly into the generated .config
+          # 2. Force-enable USB Audio (UAC2) for the motherboard crackle fix
           echo "CONFIG_USB_CONFIGFS_F_UAC2=y" >> .config
           echo "CONFIG_USB_CONFIGFS_F_UAC1=y" >> .config
           echo "CONFIG_USB_G_AUDIO=y" >> .config
           
-          # 3. Final build
+          # 3. Auto-accept new config symbols to prevent interactive prompts/aborts
+          make ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 olddefconfig
+          
+          # 4. Final Compilation
           make -j$(nproc --all) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1
 
       - name: Package Kernel
@@ -54,7 +57,7 @@ jobs:
           git clone --depth=1 ${{ env.ANYKERNEL_SOURCE }} -b ${{ env.ANYKERNEL_SOURCE_BRANCH }} AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/LICENSE AnyKernel3/README.md
           
-          # Search for the output image in the source tree
+          # Search and copy the build output
           if [[ -f kernel-source/arch/arm64/boot/Image.gz-dtb ]]; then
             cp kernel-source/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           elif [[ -f kernel-source/arch/arm64/boot/Image-dtb ]]; then
@@ -70,7 +73,7 @@ jobs:
           fi
 
       - name: Upload Kernel Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
-          name: MikaKernel-UAC2-Miatoll
+          name: MikaKernel-UAC2-Final
           path: AnyKernel3/*
